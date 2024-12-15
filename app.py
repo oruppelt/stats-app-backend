@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .for_against import router as for_against_router
-from .strength import router as strength_router
-from .schedule_strength import router as schedule_strength_router
+from for_against import router as for_against_router
+from strength import router as strength_router
+from schedule_strength import router as schedule_strength_router
 
 app = FastAPI()
 

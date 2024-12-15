@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 import pandas as pd
 import numpy as np
-from .constants import SHEET_ID, DATA_TAB
+from constants import SHEET_ID, DATA_TAB
 
 router = APIRouter()
 
