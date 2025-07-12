@@ -158,8 +158,8 @@ async def strength():
         logger.info("Rounded alternative win rates to 2 decimal places")
 
         # Fill NaN values with -1
-        df_alt_wins = df_alt_wins.fillna(-1)
-        logger.info("Filled NaN values in alternative wins with -1")
+        # df_alt_wins = df_alt_wins.fillna(-1)
+        # logger.info("Filled NaN values in alternative wins with -1")
 
         # Calculate schedule strength difference
         try:
