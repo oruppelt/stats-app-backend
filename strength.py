@@ -10,23 +10,8 @@ router = APIRouter()
 logger = setup_logging("INFO")
 cache = get_cache()
 
-@router.get("/strength")
-async def strength(response: Response):
-    start_time = datetime.now()
-    logger.info("Starting strength calculation endpoint")
-
-    # Check cache first
-    cache_key = "strength"
-    cached_data = cache.get(cache_key)
-    if cached_data is not None:
-        logger.info("Returning cached strength data")
-        response.headers["X-Cache-Status"] = "HIT"
-        response.headers["Cache-Control"] = "public, max-age=300"
-        return cached_data
-
-    response.headers["X-Cache-Status"] = "MISS"
-    response.headers["Cache-Control"] = "public, max-age=300"
-
+async def _compute_strength():
+    """Internal function to compute strength data (for cache.get_or_compute)"""
     try:
         # Log Google Sheets URL construction
         URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={DATA_TAB}'
@@ -217,10 +202,6 @@ async def strength(response: Response):
             logger.info(f"Successfully formatted response data: {len(matrix_data)} team records")
             logger.info(f"Win rate range: {min_win_rate:.3f} to {max_win_rate:.3f}")
             
-            # Log total processing time
-            duration = (datetime.now() - start_time).total_seconds()
-            logger.info(f"Strength calculation completed successfully in {duration:.3f}s")
-
             result = {
                 "teams": teams,
                 "matrix": matrix_data,
@@ -231,9 +212,7 @@ async def strength(response: Response):
                 }
             }
 
-            # Cache the result
-            cache.set(cache_key, result)
-
+            logger.info(f"Successfully computed strength data: {len(matrix_data)} team records")
             return result
         except Exception as format_error:
             log_error_with_context(logger, format_error, {
@@ -244,11 +223,39 @@ async def strength(response: Response):
             raise
     except Exception as e:
         # Log the error with full context
-        duration = (datetime.now() - start_time).total_seconds()
         log_error_with_context(logger, e, {
             "endpoint": "strength",
-            "processing_time": f"{duration:.3f}s",
             "error_type": type(e).__name__
         })
-        logger.error(f"Strength calculation failed after {duration:.3f}s")
+        logger.error(f"Strength calculation failed")
+        raise  # Re-raise to let FastAPI handle it
+
+
+@router.get("/strength")
+async def strength(response: Response):
+    """Strength endpoint with request coalescing"""
+    start_time = datetime.now()
+    logger.info("Starting strength calculation endpoint")
+
+    cache_key = "strength"
+
+    try:
+        # Use get_or_compute for automatic request coalescing
+        result = await cache.get_or_compute(cache_key, _compute_strength)
+
+        # Set cache headers
+        cached_value = cache.get(cache_key)
+        if cached_value is not None:
+            response.headers["X-Cache-Status"] = "HIT"
+        else:
+            response.headers["X-Cache-Status"] = "MISS"
+        response.headers["Cache-Control"] = "public, max-age=300"
+
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Strength endpoint completed in {duration:.3f}s")
+
+        return result
+    except Exception as e:
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.error(f"Strength endpoint failed after {duration:.3f}s: {str(e)}")
         return {"error": str(e)}

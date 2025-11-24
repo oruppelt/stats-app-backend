@@ -1,17 +1,18 @@
 """
-Simple in-memory cache with TTL for reducing Google Sheets API calls.
-Thread-safe implementation for FastAPI.
+Simple in-memory cache with TTL and request coalescing for reducing Google Sheets API calls.
+Thread-safe and async-safe implementation for FastAPI.
 """
 import time
+import asyncio
 from threading import Lock
-from typing import Any, Optional, Dict, Tuple
+from typing import Any, Optional, Dict, Tuple, Callable, Awaitable
 from logger_config import setup_logging
 
 logger = setup_logging("INFO")
 
 
 class SimpleCache:
-    """Thread-safe in-memory cache with TTL support"""
+    """Thread-safe in-memory cache with TTL support and request coalescing"""
 
     def __init__(self, ttl_seconds: int = 300):
         """
@@ -23,6 +24,8 @@ class SimpleCache:
         self.ttl_seconds = ttl_seconds
         self.cache: Dict[str, Tuple[Any, float]] = {}
         self.lock = Lock()
+        self.in_progress: Dict[str, asyncio.Lock] = {}
+        self.progress_lock = Lock()
         logger.info(f"Cache initialized with TTL: {ttl_seconds}s ({ttl_seconds/60:.1f} minutes)")
 
     def get(self, key: str) -> Optional[Any]:
@@ -100,6 +103,60 @@ class SimpleCache:
                 logger.info(f"Cache CLEANUP: Removed {len(expired_keys)} expired entries")
 
             return len(expired_keys)
+
+    async def get_or_compute(self, key: str, compute_fn: Callable[[], Awaitable[Any]]) -> Any:
+        """
+        Get value from cache or compute it if missing. Prevents duplicate concurrent computations
+        for the same key (request coalescing).
+
+        Args:
+            key: Cache key
+            compute_fn: Async function to compute the value if not cached
+
+        Returns:
+            Cached or computed value
+        """
+        # First, try to get from cache
+        cached_value = self.get(key)
+        if cached_value is not None:
+            return cached_value
+
+        # Check if someone else is already computing this key
+        with self.progress_lock:
+            if key in self.in_progress:
+                # Another request is already fetching this key
+                lock = self.in_progress[key]
+                logger.info(f"Request coalescing: Waiting for in-progress fetch of '{key}'")
+            else:
+                # We're the first request for this key, create a lock
+                lock = asyncio.Lock()
+                self.in_progress[key] = lock
+                logger.info(f"Request coalescing: Starting new fetch for '{key}'")
+
+        # Acquire the lock (either we created it or we're waiting for someone else)
+        async with lock:
+            # Double-check cache after acquiring lock (might have been populated while waiting)
+            cached_value = self.get(key)
+            if cached_value is not None:
+                logger.info(f"Request coalescing: '{key}' was populated while waiting")
+                # Clean up the in-progress lock if we're the last one
+                with self.progress_lock:
+                    if key in self.in_progress and not lock.locked():
+                        del self.in_progress[key]
+                return cached_value
+
+            # Cache miss - compute the value
+            try:
+                logger.info(f"Request coalescing: Computing value for '{key}'")
+                value = await compute_fn()
+                self.set(key, value)
+                return value
+            finally:
+                # Clean up the in-progress lock
+                with self.progress_lock:
+                    if key in self.in_progress:
+                        del self.in_progress[key]
+                        logger.info(f"Request coalescing: Completed fetch for '{key}'")
 
     def get_stats(self) -> Dict[str, Any]:
         """
