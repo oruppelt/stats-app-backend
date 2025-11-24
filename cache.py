@@ -1,0 +1,137 @@
+"""
+Simple in-memory cache with TTL for reducing Google Sheets API calls.
+Thread-safe implementation for FastAPI.
+"""
+import time
+from threading import Lock
+from typing import Any, Optional, Dict, Tuple
+from logger_config import setup_logging
+
+logger = setup_logging("INFO")
+
+
+class SimpleCache:
+    """Thread-safe in-memory cache with TTL support"""
+
+    def __init__(self, ttl_seconds: int = 300):
+        """
+        Initialize cache with specified TTL.
+
+        Args:
+            ttl_seconds: Time to live in seconds (default: 300 = 5 minutes)
+        """
+        self.ttl_seconds = ttl_seconds
+        self.cache: Dict[str, Tuple[Any, float]] = {}
+        self.lock = Lock()
+        logger.info(f"Cache initialized with TTL: {ttl_seconds}s ({ttl_seconds/60:.1f} minutes)")
+
+    def get(self, key: str) -> Optional[Any]:
+        """
+        Get value from cache if it exists and is not expired.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Cached value if fresh, None if expired or not found
+        """
+        with self.lock:
+            if key not in self.cache:
+                logger.debug(f"Cache MISS: '{key}' not found in cache")
+                return None
+
+            value, timestamp = self.cache[key]
+            age = time.time() - timestamp
+
+            if age > self.ttl_seconds:
+                logger.info(f"Cache EXPIRED: '{key}' (age: {age:.1f}s, ttl: {self.ttl_seconds}s)")
+                del self.cache[key]
+                return None
+
+            logger.info(f"Cache HIT: '{key}' (age: {age:.1f}s, ttl: {self.ttl_seconds}s)")
+            return value
+
+    def set(self, key: str, value: Any) -> None:
+        """
+        Set value in cache with current timestamp.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+        """
+        with self.lock:
+            self.cache[key] = (value, time.time())
+            logger.info(f"Cache SET: '{key}' cached for {self.ttl_seconds}s")
+
+    def clear(self, key: Optional[str] = None) -> None:
+        """
+        Clear cache entry or entire cache.
+
+        Args:
+            key: Specific key to clear, or None to clear all
+        """
+        with self.lock:
+            if key is None:
+                count = len(self.cache)
+                self.cache.clear()
+                logger.info(f"Cache CLEARED: All {count} entries removed")
+            elif key in self.cache:
+                del self.cache[key]
+                logger.info(f"Cache CLEARED: '{key}' removed")
+
+    def cleanup_expired(self) -> int:
+        """
+        Remove all expired entries from cache.
+
+        Returns:
+            Number of entries removed
+        """
+        with self.lock:
+            current_time = time.time()
+            expired_keys = [
+                key for key, (_, timestamp) in self.cache.items()
+                if current_time - timestamp > self.ttl_seconds
+            ]
+
+            for key in expired_keys:
+                del self.cache[key]
+
+            if expired_keys:
+                logger.info(f"Cache CLEANUP: Removed {len(expired_keys)} expired entries")
+
+            return len(expired_keys)
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get cache statistics for monitoring.
+
+        Returns:
+            Dictionary with cache stats
+        """
+        with self.lock:
+            current_time = time.time()
+            entries = []
+
+            for key, (_, timestamp) in self.cache.items():
+                age = current_time - timestamp
+                entries.append({
+                    'key': key,
+                    'age_seconds': round(age, 1),
+                    'ttl_remaining': round(self.ttl_seconds - age, 1),
+                    'expired': age > self.ttl_seconds
+                })
+
+            return {
+                'total_entries': len(self.cache),
+                'ttl_seconds': self.ttl_seconds,
+                'entries': entries
+            }
+
+
+# Global cache instance with 5-minute TTL
+_cache = SimpleCache(ttl_seconds=300)
+
+
+def get_cache() -> SimpleCache:
+    """Get the global cache instance"""
+    return _cache

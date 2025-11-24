@@ -1,18 +1,32 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 import pandas as pd
 import numpy as np
 from constants import SHEET_ID, DATA_TAB
 from logger_config import setup_logging, log_data_shape, log_error_with_context
 from datetime import datetime
+from cache import get_cache
 
 router = APIRouter()
 logger = setup_logging("INFO")
+cache = get_cache()
 
 @router.get("/for_against")
-async def for_against():
+async def for_against(response: Response):
     start_time = datetime.now()
     logger.info("Starting for_against calculation endpoint")
-    
+
+    # Check cache first
+    cache_key = "for_against"
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        logger.info("Returning cached for_against data")
+        response.headers["X-Cache-Status"] = "HIT"
+        response.headers["Cache-Control"] = "public, max-age=300"
+        return cached_data
+
+    response.headers["X-Cache-Status"] = "MISS"
+    response.headers["Cache-Control"] = "public, max-age=300"
+
     try:
         # Log Google Sheets URL construction
         URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={DATA_TAB}'
@@ -112,12 +126,17 @@ async def for_against():
             # Log total processing time
             duration = (datetime.now() - start_time).total_seconds()
             logger.info(f"For/Against calculation completed successfully in {duration:.3f}s")
-            
-            return {
-                "df_scores": scores_list, 
-                "median_scored_for": median_scored_for, 
+
+            result = {
+                "df_scores": scores_list,
+                "median_scored_for": median_scored_for,
                 "median_scored_against": median_scored_against
             }
+
+            # Cache the result
+            cache.set(cache_key, result)
+
+            return result
         except Exception as format_error:
             log_error_with_context(logger, format_error, {
                 "operation": "response_formatting",
