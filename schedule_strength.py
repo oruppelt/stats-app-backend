@@ -10,22 +10,10 @@ router = APIRouter()
 logger = setup_logging("INFO")
 cache = get_cache()
 
-@router.get("/schedule_strength")
-async def strength(response: Response):
+async def _compute_schedule_strength():
+    """Internal function to compute schedule strength data (for cache.get_or_compute)"""
     start_time = datetime.now()
-    logger.info("Starting schedule_strength calculation endpoint")
-
-    # Check cache first
-    cache_key = "schedule_strength"
-    cached_data = cache.get(cache_key)
-    if cached_data is not None:
-        logger.info("Returning cached schedule_strength data")
-        response.headers["X-Cache-Status"] = "HIT"
-        response.headers["Cache-Control"] = "public, max-age=300"
-        return cached_data
-
-    response.headers["X-Cache-Status"] = "MISS"
-    response.headers["Cache-Control"] = "public, max-age=300"
+    logger.info("Computing schedule_strength data")
 
     try:
         # Log Google Sheets URL construction
@@ -216,21 +204,18 @@ async def strength(response: Response):
             matrix_data = df_diff.reset_index().to_dict('records')
             df_wins = df_wins.fillna(-1)
             matrix_data_wins = df_wins.reset_index().to_dict('records')
-            
+
             logger.info(f"Successfully formatted response data: {len(matrix_data)} team records")
-            
+
             # Log total processing time
             duration = (datetime.now() - start_time).total_seconds()
-            logger.info(f"Schedule strength calculation completed successfully in {duration:.3f}s")
+            logger.info(f"Schedule strength data computed successfully in {duration:.3f}s")
 
             result = {
                 "teams": teams,
                 "matrix": matrix_data,
                 "matrix_wins": matrix_data_wins
             }
-
-            # Cache the result
-            cache.set(cache_key, result)
 
             return result
         except Exception as format_error:
@@ -250,4 +235,25 @@ async def strength(response: Response):
             "error_type": type(e).__name__
         })
         logger.error(f"Schedule strength calculation failed after {duration:.3f}s")
+        raise
+
+@router.get("/schedule_strength")
+async def strength(response: Response):
+    """Schedule strength endpoint with caching"""
+    cache_key = "schedule_strength"
+
+    try:
+        result = await cache.get_or_compute(cache_key, _compute_schedule_strength)
+
+        # Set cache headers
+        cached_value = cache.get(cache_key)
+        if cached_value is not None:
+            response.headers["X-Cache-Status"] = "HIT"
+        else:
+            response.headers["X-Cache-Status"] = "MISS"
+        response.headers["Cache-Control"] = "public, max-age=300"
+
+        return result
+    except Exception as e:
+        logger.error(f"Error in schedule_strength endpoint: {str(e)}")
         return {"error": str(e)}
