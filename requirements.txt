@@ -1,52 +1,40 @@
-annotated-types==0.7.0
-anyio==4.6.2.post1
-appnope==0.1.4
-asttokens==3.0.0
-click==8.1.7
-comm==0.2.2
-contourpy==1.3.1
-cycler==0.12.1
-debugpy==1.8.9
-decorator==5.1.1
-executing==2.1.0
+# Production dependencies only - optimized for Render deployment
+#
+# REMOVED from original requirements.txt to speed up deployment:
+# - ipykernel, ipython, jupyter_* (Jupyter notebook - dev only) ~10MB
+# - matplotlib, pillow, fonttools, kiwisolver, contourpy, cycler (plotting - not used in backend) ~20MB
+# - debugpy, pexpect, ptyprocess (debugging/dev tools) ~5MB
+# - prompt_toolkit, Pygments, jedi, parso, wcwidth (IPython UI) ~5MB
+# - asttokens, executing, pure_eval, stack-data, decorator (IPython deps) ~2MB
+# - appnope (macOS-only for IPython)
+# - psutil, nest-asyncio, tornado, pyzmq, comm, traitlets, platformdirs (Jupyter deps)
+# - packaging, pyparsing (unused utility libs)
+#
+# Total reduction: ~42MB of dependencies removed
+# Expected deployment time: 1-2 minutes (down from 4+ minutes)
+
+# Core FastAPI
 fastapi==0.115.5
-fonttools==4.55.0
-h11==0.14.0
-idna==3.10
-ipykernel==6.29.5
-ipython==8.30.0
-jedi==0.19.2
-jupyter_client==8.6.3
-jupyter_core==5.7.2
-kiwisolver==1.4.7
-matplotlib==3.9.3
-matplotlib-inline==0.1.7
-nest-asyncio==1.6.0
-numpy==2.1.3
-packaging==24.2
-pandas==2.2.3
-parso==0.8.4
-pexpect==4.9.0
-pillow==11.0.0
-platformdirs==4.3.6
-prompt_toolkit==3.0.48
-psutil==6.1.0
-ptyprocess==0.7.0
-pure_eval==0.2.3
+uvicorn==0.32.1
+starlette==0.41.3
 pydantic==2.10.2
 pydantic_core==2.27.1
-Pygments==2.18.0
-pyparsing==3.2.0
+
+# Data processing (required)
+pandas==2.2.3
+numpy==2.1.3
+
+# FastAPI dependencies
+anyio==4.6.2.post1
+sniffio==1.3.1
+h11==0.14.0
+click==8.1.7
+idna==3.10
+typing_extensions==4.12.2
+annotated-types==0.7.0
+
+# Pandas dependencies
 python-dateutil==2.9.0.post0
 pytz==2024.2
-pyzmq==26.2.0
-six==1.16.0
-sniffio==1.3.1
-stack-data==0.6.3
-starlette==0.41.3
-tornado==6.4.2
-traitlets==5.14.3
-typing_extensions==4.12.2
 tzdata==2024.2
-uvicorn==0.32.1
-wcwidth==0.2.13
+six==1.16.0
