@@ -8,43 +8,100 @@ from cache import get_cache
 import time
 from datetime import datetime
 import asyncio
+import json
+from pathlib import Path
 
 # Setup logging
 logger = setup_logging("INFO")
 
 app = FastAPI()
 
-@app.on_event("startup")
-async def startup_event():
-    """Pre-warm the cache on startup to avoid 429 errors from Google Sheets"""
+DATA_DIR = Path(__file__).parent / "data"
+
+def load_static_data(filename: str):
+    """Load data from JSON file"""
+    filepath = DATA_DIR / filename
+    if filepath.exists():
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    return None
+
+async def background_refresh():
+    """Background task to refresh cache from Google Sheets after startup"""
+    await asyncio.sleep(5)  # Wait 5 seconds after startup
+
     logger.info("=" * 80)
-    logger.info("CACHE WARMUP: Starting cache pre-population...")
+    logger.info("BACKGROUND REFRESH: Starting data refresh from Google Sheets...")
     logger.info("=" * 80)
 
     cache = get_cache()
 
     try:
-        # Warm up strength cache
-        logger.info("Warming up 'strength' cache...")
-        strength_data = await cache.get_or_compute("strength", compute_strength_data)
-        logger.info(f"✓ 'strength' cache warmed up successfully (teams: {len(strength_data.get('teams', []))})")
+        # Refresh strength cache
+        logger.info("Refreshing 'strength' cache from Google Sheets...")
+        strength_data = await compute_strength_data()
+        cache.set("strength", strength_data)
+        logger.info(f"✓ 'strength' cache refreshed successfully (teams: {len(strength_data.get('teams', []))})")
 
-        # Warm up schedule_strength cache
-        logger.info("Warming up 'schedule_strength' cache...")
-        schedule_data = await cache.get_or_compute("schedule_strength", compute_schedule_data)
-        logger.info(f"✓ 'schedule_strength' cache warmed up successfully (teams: {len(schedule_data.get('teams', []))})")
-
-        # Note: for_against uses the same data as strength, so it's already cached
-        logger.info("✓ 'for_against' will use the same cached data as 'strength'")
+        # Refresh schedule_strength cache
+        logger.info("Refreshing 'schedule_strength' cache from Google Sheets...")
+        schedule_data = await compute_schedule_data()
+        cache.set("schedule_strength", schedule_data)
+        logger.info(f"✓ 'schedule_strength' cache refreshed successfully (teams: {len(schedule_data.get('teams', []))})")
 
         logger.info("=" * 80)
-        logger.info("CACHE WARMUP: Complete! All endpoints ready to serve cached data.")
+        logger.info("BACKGROUND REFRESH: Complete! Cache updated with fresh data.")
         logger.info("=" * 80)
 
     except Exception as e:
         logger.error("=" * 80)
-        logger.error(f"CACHE WARMUP FAILED: {str(e)}")
-        logger.error("App will continue but may experience 429 errors on first requests")
+        logger.error(f"BACKGROUND REFRESH FAILED: {str(e)}")
+        logger.error("Static data will continue to be served until next refresh")
+        logger.error("=" * 80)
+
+@app.on_event("startup")
+async def startup_event():
+    """Load static data on startup, then refresh in background"""
+    logger.info("=" * 80)
+    logger.info("STARTUP: Loading static data from JSON files...")
+    logger.info("=" * 80)
+
+    cache = get_cache()
+
+    try:
+        # Load strength data from JSON
+        logger.info("Loading 'strength' data from JSON...")
+        strength_data = load_static_data("strength.json")
+        if strength_data:
+            cache.set("strength", strength_data)
+            logger.info(f"✓ 'strength' data loaded successfully (teams: {len(strength_data.get('teams', []))})")
+        else:
+            logger.warning("⚠ No static 'strength' data found, will fetch from Google Sheets")
+
+        # Load schedule_strength data from JSON
+        logger.info("Loading 'schedule_strength' data from JSON...")
+        schedule_data = load_static_data("schedule_strength.json")
+        if schedule_data:
+            cache.set("schedule_strength", schedule_data)
+            logger.info(f"✓ 'schedule_strength' data loaded successfully (teams: {len(schedule_data.get('teams', []))})")
+        else:
+            logger.warning("⚠ No static 'schedule_strength' data found, will fetch from Google Sheets")
+
+        # Note: for_against uses the same data as strength
+        logger.info("✓ 'for_against' will use the same cached data as 'strength'")
+
+        logger.info("=" * 80)
+        logger.info("STARTUP: Complete! All endpoints ready with static data.")
+        logger.info("Background refresh will start in 5 seconds...")
+        logger.info("=" * 80)
+
+        # Start background refresh task
+        asyncio.create_task(background_refresh())
+
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error(f"STARTUP FAILED: {str(e)}")
+        logger.error("App will continue but may need to fetch from Google Sheets")
         logger.error("=" * 80)
 
 @app.middleware("http")
