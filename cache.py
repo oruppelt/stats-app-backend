@@ -185,8 +185,8 @@ class SimpleCache:
             }
 
 
-# Global cache instance with 5-minute TTL
-_cache = SimpleCache(ttl_seconds=300)
+# Global cache instance with 2-minute TTL
+_cache = SimpleCache(ttl_seconds=120)
 
 
 def get_cache() -> SimpleCache:
